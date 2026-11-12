@@ -6,7 +6,7 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 
 - [x] Bước 1: thiết kế giao thức (`docs/protocol.md`)
 - [x] Bước 2: handshake TCP cơ bản (client gửi `PING`, server trả `PONG`)
-- [ ] Bước 3: đa luồng
+- [x] Bước 3: đa luồng
 - [ ] Bước 4: đăng nhập và quản lý người dùng
 - [ ] Bước 5: gửi tin nhắn chung và riêng
 - [ ] Bước 6: gửi file
