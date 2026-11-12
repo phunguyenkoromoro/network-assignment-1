@@ -8,7 +8,7 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 2: handshake TCP cơ bản (client gửi `PING`, server trả `PONG`)
 - [x] Bước 3: đa luồng
 - [x] Bước 4: đăng nhập và quản lý người dùng
-- [ ] Bước 5: gửi tin nhắn chung và riêng
+- [x] Bước 5: gửi tin nhắn chung và riêng
 - [ ] Bước 6: gửi file
 - [ ] Bước 7: xử lý lỗi và ngắt kết nối
 - [ ] Bước 8: mã hóa
@@ -67,6 +67,29 @@ Cách test:
 Lưu ý:
 - `server/users.json` chứa hash mật khẩu nên không commit, đã thêm vào `.gitignore`.
 - Mật khẩu hiện gửi plaintext trên đường truyền, bước 8 (mã hóa) sẽ xử lý.
+
+## Bước 5: nhắn tin chung và riêng
+
+Dùng gói `MSG` với trường `to`:
+- `to = "ALL"`: chat chung, server forward cho tất cả người đang online trừ người gửi.
+- `to = <tên>`: chat riêng, server chỉ forward cho người đó. Người nhận không online thì server trả `ERROR` với mã `USER_OFFLINE`.
+- Server tự điền `from` theo người đã đăng nhập trên kết nối đó, không tin `from` do client gửi, nên không giả mạo được người gửi.
+- `MSG` thiếu `to` hoặc `text` rỗng thì trả `ERROR` với mã `BAD_PACKET`.
+
+Lệnh ở client:
+- Gõ chữ bình thường rồi Enter: chat chung.
+- `/msg <tên> <nội dung>`: chat riêng.
+- `/users`, `/quit` như bước 4.
+
+Tin nhận được hiện dạng `[Chung] nam: ...` hoặc `[Riêng] nam: ...`.
+
+Khi forward, server tìm `Session` của người nhận trong `clients` rồi gửi bằng `send_lock` riêng của kết nối đó, nên nhiều người chat cùng lúc vẫn không bị trộn byte.
+
+Cách test:
+- Chạy server, mở 3 client với 3 tên khác nhau (ví dụ aqua, nam, lam).
+- aqua gõ chữ bình thường: nam và lam đều nhận `[Chung]`, aqua không nhận lại tin của chính mình.
+- aqua gõ `/msg nam ...`: chỉ nam nhận `[Riêng]`, lam không thấy gì.
+- aqua gõ `/msg ghost ...`: nhận lỗi người nhận không online.
 
 ## Cấu trúc thư mục
 
