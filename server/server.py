@@ -24,6 +24,10 @@ class Session:
             send_packet(self.conn, packet)
 
 
+def error(code, message):
+    return {"type": "ERROR", "code": code, "message": message}
+
+
 def hash_password(password):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
@@ -82,6 +86,30 @@ def try_login(session, packet):
     return username
 
 
+def handle_msg(session, username, packet):
+    to = packet.get("to")
+    text = packet.get("text")
+    if not to or not isinstance(text, str) or not text:
+        session.send(error("BAD_PACKET", "MSG thiếu người nhận hoặc nội dung"))
+        return
+    out = {"type": "MSG", "from": username, "to": to, "text": text}
+    with lock:
+        if to == "ALL":
+            targets = [s for name, s in clients.items() if name != username]
+        elif to in clients:
+            targets = [clients[to]]
+        else:
+            targets = None
+    if targets is None:
+        session.send(error("USER_OFFLINE", "Người nhận không online"))
+        return
+    for target in targets:
+        try:
+            target.send(out)
+        except OSError:
+            pass
+
+
 def handle_client(conn, addr):
     print(f"[+] {addr} đã kết nối")
     session = Session(conn)
@@ -96,12 +124,13 @@ def handle_client(conn, addr):
                 if kind == "AUTH":
                     username = try_login(session, packet)
                 else:
-                    session.send({"type": "ERROR", "code": "NOT_AUTHENTICATED",
-                                  "message": "Cần đăng nhập trước"})
+                    session.send(error("NOT_AUTHENTICATED", "Cần đăng nhập trước"))
             elif kind == "GET_USERS":
                 with lock:
                     users = list(clients)
                 session.send({"type": "USERS", "users": users})
+            elif kind == "MSG":
+                handle_msg(session, username, packet)
             elif kind == "PING":
                 session.send({"type": "PONG"})
     except ConnectionError:
