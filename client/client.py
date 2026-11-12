@@ -16,7 +16,7 @@ def login(sock):
         reply = recv_packet(sock)
         if reply["type"] == "AUTH_OK":
             print(reply["message"])
-            return
+            return username
         print("Đăng nhập thất bại:", reply["reason"])
 
 
@@ -24,8 +24,14 @@ def listen(sock, done):
     try:
         while True:
             packet = recv_packet(sock)
-            if packet["type"] == "USERS":
-                print("\nNgười đang online:", ", ".join(packet["users"]))
+            kind = packet["type"]
+            if kind == "USERS":
+                print("\nNgười đang online: " + ", ".join(packet["users"]))
+            elif kind == "MSG":
+                tag = "Chung" if packet["to"] == "ALL" else "Riêng"
+                print(f"\n[{tag}] {packet['from']}: {packet['text']}")
+            elif kind == "ERROR":
+                print("\nLỗi:", packet["message"])
             else:
                 print("\n", packet)
     except OSError:
@@ -36,18 +42,31 @@ def listen(sock, done):
 def main():
     with socket.create_connection((HOST, PORT)) as sock:
         print(f"Đã kết nối tới {HOST}:{PORT}")
-        login(sock)
+        username = login(sock)
         done = threading.Event()
         threading.Thread(target=listen, args=(sock, done), daemon=True).start()
-        print("Lệnh: /users xem người online, /quit thoát")
+        print("Gõ chữ bình thường để chat chung")
+        print("Lệnh: /msg <tên> <nội dung>, /users, /quit")
         while True:
-            command = input().strip()
-            if command == "/users":
+            line = input().strip()
+            if not line:
+                continue
+            if line == "/users":
                 send_packet(sock, {"type": "GET_USERS"})
-            elif command == "/quit":
+            elif line == "/quit":
                 done.set()
                 send_packet(sock, {"type": "BYE"})
                 break
+            elif line.startswith("/msg "):
+                parts = line.split(" ", 2)
+                if len(parts) < 3:
+                    print("Cú pháp: /msg <tên> <nội dung>")
+                    continue
+                send_packet(sock, {"type": "MSG", "from": username, "to": parts[1], "text": parts[2]})
+            elif line.startswith("/"):
+                print("Lệnh không hợp lệ")
+            else:
+                send_packet(sock, {"type": "MSG", "from": username, "to": "ALL", "text": line})
 
 
 if __name__ == "__main__":
