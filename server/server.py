@@ -1,18 +1,26 @@
 import socket
+import threading
 
 from common.protocol import recv_packet, send_packet
 
 HOST = "0.0.0.0"
-PORT = 5055
+PORT = 5000
 
 
 def handle_client(conn, addr):
     print(f"[+] {addr} đã kết nối")
-    packet = recv_packet(conn)
-    if packet["type"] == "PING":
-        send_packet(conn, {"type": "PONG"})
-    conn.close()
-    print(f"[-] {addr} đã ngắt kết nối")
+    try:
+        while True:
+            packet = recv_packet(conn)
+            if packet["type"] == "PING":
+                send_packet(conn, {"type": "PONG"})
+            elif packet["type"] == "BYE":
+                break
+    except ConnectionError:
+        pass
+    finally:
+        conn.close()
+        print(f"[-] {addr} đã ngắt kết nối")
 
 
 def main():
@@ -20,10 +28,10 @@ def main():
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
         server.listen()
-        print(f"Server đang chạy tại cổng {PORT}")
+        print(f"Server đang chạy ở cổng {PORT}")
         while True:
             conn, addr = server.accept()
-            handle_client(conn, addr)
+            threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
 
 
 if __name__ == "__main__":
