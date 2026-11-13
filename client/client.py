@@ -6,7 +6,7 @@ import socket
 import threading
 import uuid
 
-from common.protocol import recv_packet, send_packet
+from common.protocol import DecryptError, recv_packet, send_packet
 
 HOST = "127.0.0.1"
 PORT = 5000
@@ -214,6 +214,8 @@ def main():
                     print("Lệnh không hợp lệ")
                 else:
                     send(sock, {"type": "MSG", "from": username, "to": "ALL", "text": line})
+        except DecryptError:
+            print("\nKhông giải mã được dữ liệu từ server, kiểm tra file secret.key giống nhau ở server và client")
         except (OSError, ValueError):
             if not lost.is_set():
                 print("\nMất kết nối tới server")
