@@ -8,8 +8,8 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 2: handshake TCP cơ bản (client gửi `PING`, server trả `PONG`)
 - [x] Bước 3: đa luồng
 - [x] Bước 4: đăng nhập và quản lý người dùng
-- [ ] Bước 5: gửi tin nhắn chung và riêng
-- [ ] Bước 6: gửi file
+- [x] Bước 5: gửi tin nhắn chung và riêng
+- [x] Bước 6: gửi file
 - [ ] Bước 7: xử lý lỗi và ngắt kết nối
 - [ ] Bước 8: mã hóa
 - [ ] Bước 9: giao diện CLI
