@@ -8,7 +8,7 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 2: handshake TCP cơ bản (client gửi `PING`, server trả `PONG`)
 - [x] Bước 3: đa luồng
 - [x] Bước 4: đăng nhập và quản lý người dùng
-- [x] Bước 5: gửi tin nhắn chung và riêng
+- [ ] Bước 5: gửi tin nhắn chung và riêng
 - [ ] Bước 6: gửi file
 - [ ] Bước 7: xử lý lỗi và ngắt kết nối
 - [ ] Bước 8: mã hóa
@@ -86,10 +86,42 @@ Tin nhận được hiện dạng `[Chung] nam: ...` hoặc `[Riêng] nam: ...`.
 Khi forward, server tìm `Session` của người nhận trong `clients` rồi gửi bằng `send_lock` riêng của kết nối đó, nên nhiều người chat cùng lúc vẫn không bị trộn byte.
 
 Cách test:
-- Chạy server, mở 3 client với 3 tên khác nhau (ví dụ aqua, nam, lam).
-- aqua gõ chữ bình thường: nam và lam đều nhận `[Chung]`, aqua không nhận lại tin của chính mình.
-- aqua gõ `/msg nam ...`: chỉ nam nhận `[Riêng]`, lam không thấy gì.
-- aqua gõ `/msg ghost ...`: nhận lỗi người nhận không online.
+- Chạy server, mở 3 client với 3 tên khác nhau (ví dụ phu, nam, lam).
+- phu gõ chữ bình thường: nam và lam đều nhận `[Chung]`, phu không nhận lại tin của chính mình.
+- phu gõ `/msg nam ...`: chỉ nam nhận `[Riêng]`, lam không thấy gì.
+- phu gõ `/msg ghost ...`: nhận lỗi người nhận không online.
+
+## Bước 6: gửi file
+
+Gửi file bằng 3 loại gói như trong `protocol.md`: `FILE_START` (tên file, kích thước, người nhận), nhiều `FILE_CHUNK` (mỗi mảnh 4096 byte, mã hóa base64), rồi `FILE_END` kèm SHA-256 của cả file.
+
+Lệnh ở client: `/send <tên> <đường dẫn file>`. Chỉ gửi cho một người, không gửi `ALL`. Đường dẫn có dấu cách thì cứ gõ bình thường hoặc để trong dấu ngoặc kép.
+
+Server không lưu file, chỉ forward. Khi nhận `FILE_START`, server ghi nhớ ai gửi cho ai trong dict `transfers` (key là `(người gửi, file_id)`), vì `FILE_CHUNK` và `FILE_END` không có trường `to` nên cần biết chuyển tiếp cho đúng người. Key có cả người gửi nên người khác không chen vào được file đang gửi của người ta.
+
+Bên nhận ghi từng mảnh xuống file tạm `.part` trong thư mục `downloads/`, tính SHA-256 dần theo từng mảnh. Nhận `FILE_END` thì so SHA-256 và kích thước:
+- Khớp: đổi tên file tạm thành tên thật (trùng tên thì thêm `(1)`, `(2)`...).
+- Không khớp: xóa file tạm, báo file bị hỏng.
+
+Các trường hợp đã xử lý:
+- Tên file người gửi cung cấp bị cắt phần đường dẫn (`../../x` thành `x`), nên không ghi ra ngoài `downloads/` được.
+- Mảnh phải đến đúng thứ tự `seq`, sai thì hủy file đang nhận.
+- Người gửi ngắt kết nối giữa chừng: server báo `ERROR` mã `FILE_ERROR` cho người nhận, bên nhận xóa file tạm.
+- Người nhận ngắt kết nối giữa chừng: server báo `FILE_ERROR` cho người gửi, client gửi tự dừng.
+- Client nhận thoát giữa chừng (kể cả Ctrl+C): file tạm đang nhận dở bị xóa.
+- Gửi cho người không online: client chặn luôn từ đầu, không gửi gì.
+- File rỗng (0 byte) và tên file tiếng Việt có dấu vẫn gửi được.
+
+Khi đang gửi file, luồng chính của client bận nên chưa gõ lệnh khác được, nhưng vẫn nhận tin nhắn bình thường vì có thread nghe riêng.
+
+Cách test:
+- Chạy server, mở 2 client (ví dụ phu và nam).
+- phu gõ `/send nam C:\Users\...\baocao.pdf`. phu thấy phần trăm tăng dần, nam thấy thông báo bắt đầu và kết thúc.
+- Mở `downloads/` trong thư mục chạy client của nam, so sánh file với bản gốc (kích thước bằng nhau, mở được bình thường).
+- Thử file vài MB, thử gửi cho tên không online, thử đường dẫn sai.
+- Đang gửi file lớn thì đóng client nam, phu phải thấy `Gửi file bị hủy`.
+
+Lưu ý: `downloads/` chứa file nhận được nên không commit, đã thêm vào `.gitignore`.
 
 ## Cấu trúc thư mục
 
