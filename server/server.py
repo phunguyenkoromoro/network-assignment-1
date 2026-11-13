@@ -11,6 +11,7 @@ PORT = 5000
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
 clients = {}
+transfers = {}
 lock = threading.Lock()
 
 
@@ -24,8 +25,8 @@ class Session:
             send_packet(self.conn, packet)
 
 
-def error(code, message):
-    return {"type": "ERROR", "code": code, "message": message}
+def error(code, message, **extra):
+    return {"type": "ERROR", "code": code, "message": message, **extra}
 
 
 def hash_password(password):
@@ -110,6 +111,51 @@ def handle_msg(session, username, packet):
             pass
 
 
+def handle_file(session, username, packet):
+    kind = packet["type"]
+    file_id = packet.get("file_id")
+    if not file_id:
+        session.send(error("BAD_PACKET", "Gói file thiếu file_id"))
+        return
+    key = (username, file_id)
+    with lock:
+        if kind == "FILE_START":
+            recipient = packet.get("to")
+            if recipient in clients:
+                transfers[key] = recipient
+        else:
+            recipient = transfers.get(key)
+            if kind == "FILE_END":
+                transfers.pop(key, None)
+        target = clients.get(recipient)
+    if target is None:
+        if kind == "FILE_START":
+            session.send(error("USER_OFFLINE", "Người nhận không online"))
+        elif recipient is not None:
+            with lock:
+                transfers.pop(key, None)
+            session.send(error("FILE_ERROR", "Người nhận đã ngắt kết nối", file_id=file_id))
+        return
+    try:
+        target.send({**packet, "from": username})
+    except OSError:
+        pass
+
+
+def cancel_transfers(username):
+    with lock:
+        dropped = [(fid, to) for (sender, fid), to in transfers.items() if sender == username]
+        for fid, _ in dropped:
+            del transfers[(username, fid)]
+        targets = [(fid, clients.get(to)) for fid, to in dropped]
+    for fid, target in targets:
+        if target:
+            try:
+                target.send(error("FILE_ERROR", "Người gửi đã ngắt kết nối giữa chừng", file_id=fid))
+            except OSError:
+                pass
+
+
 def handle_client(conn, addr):
     print(f"[+] {addr} đã kết nối")
     session = Session(conn)
@@ -131,6 +177,8 @@ def handle_client(conn, addr):
                 session.send({"type": "USERS", "users": users})
             elif kind == "MSG":
                 handle_msg(session, username, packet)
+            elif kind in ("FILE_START", "FILE_CHUNK", "FILE_END"):
+                handle_file(session, username, packet)
             elif kind == "PING":
                 session.send({"type": "PONG"})
     except ConnectionError:
@@ -139,6 +187,7 @@ def handle_client(conn, addr):
         if username:
             with lock:
                 clients.pop(username, None)
+            cancel_transfers(username)
             broadcast_users()
         conn.close()
         print(f"[-] {addr} đã ngắt kết nối")
