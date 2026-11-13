@@ -11,7 +11,7 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 5: gửi tin nhắn chung và riêng
 - [x] Bước 6: gửi file
 - [x] Bước 7: xử lý lỗi và ngắt kết nối
-- [ ] Bước 8: mã hóa
+- [x] Bước 8: mã hóa
 - [ ] Bước 9: giao diện CLI
 - [ ] Bước 10: test và dọn code
 
@@ -151,6 +151,42 @@ Cách test:
 - Bấm Ctrl+C ở client: client in `Đã thoát`, client kia nhận list mới.
 - Tắt server bằng Ctrl+C: in `Server đã dừng`. Client đang mở sẽ báo mất kết nối.
 - Chạy client khi chưa bật server: nhận thông báo `Không kết nối được`.
+
+## Bước 8: mã hóa
+
+Mã hóa toàn bộ nội dung mọi gói tin bằng AES-256-GCM (thư viện `cryptography`). Server và client dùng chung một khóa lưu trong file `secret.key` ở thư mục gốc.
+
+Cài thư viện:
+```
+pip install -r requirements.txt
+```
+
+Khung gói tin sau khi mã hóa:
+```
++--------------+----------------+----------------------------+
+| 4 byte (N)   | 12 byte nonce  | ciphertext + 16 byte tag   |
++--------------+----------------+----------------------------+
+```
+`N` là độ dài của phần nonce + ciphertext + tag. Header 4 byte vẫn để rõ vì bên nhận cần biết đọc bao nhiêu byte.
+
+- Mỗi gói dùng một nonce ngẫu nhiên 12 byte, gửi kèm ngay đầu gói.
+- GCM vừa mã hóa vừa có tag xác thực, nên gói bị sửa dù chỉ 1 bit hoặc dùng sai khóa đều giải mã thất bại (`DecryptError`).
+- Server giải mã thất bại thì xử lý như `BAD_PACKET` ở bước 7 (trả lỗi, quá 5 lần thì ngắt). Client giải mã thất bại thì báo kiểm tra lại `secret.key`.
+- Mật khẩu đăng nhập, nội dung chat và file đều được mã hóa trên đường truyền.
+
+Quản lý khóa:
+- Lần đầu chạy, nếu chưa có `secret.key` thì tự sinh khóa 256 bit ngẫu nhiên.
+- Server và client trên cùng một máy thì dùng chung file này luôn. Khác máy thì copy `secret.key` từ máy server sang máy client, không gửi qua kênh công khai.
+- `secret.key` không được commit, đã thêm vào `.gitignore`.
+
+Hạn chế (ghi lại để bảo vệ):
+- Khóa dùng chung cho mọi người, ai có file `secret.key` đều giải mã được. Chưa có trao đổi khóa riêng cho từng kết nối như TLS.
+- Chưa chống replay: kẻ nghe lén có thể gửi lại nguyên một gói đã bắt được. Muốn chống thì cần thêm số thứ tự gói hoặc timestamp.
+
+Cách test:
+- Cài thư viện, chạy server và 2 client như thường. Chat và gửi file vẫn bình thường.
+- Xóa `secret.key` ở thư mục của một client (máy khác) rồi chạy lại: khóa mới sinh ra khác server, client báo không giải mã được.
+- Muốn thấy dữ liệu bị mã hóa thì bắt gói trên loopback bằng Wireshark, nội dung chỉ là byte ngẫu nhiên, không đọc được chữ nào.
 
 ## Cấu trúc thư mục
 
