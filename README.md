@@ -10,7 +10,7 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 4: đăng nhập và quản lý người dùng
 - [x] Bước 5: gửi tin nhắn chung và riêng
 - [x] Bước 6: gửi file
-- [ ] Bước 7: xử lý lỗi và ngắt kết nối
+- [x] Bước 7: xử lý lỗi và ngắt kết nối
 - [ ] Bước 8: mã hóa
 - [ ] Bước 9: giao diện CLI
 - [ ] Bước 10: test và dọn code
@@ -122,6 +122,35 @@ Cách test:
 - Đang gửi file lớn thì đóng client nam, phu phải thấy `Gửi file bị hủy`.
 
 Lưu ý: `downloads/` chứa file nhận được nên không commit, đã thêm vào `.gitignore`.
+
+## Bước 7: xử lý lỗi và ngắt kết nối
+
+Server không được crash dù client làm gì. Mỗi client chạy trong một thread riêng, lỗi của client nào chỉ ảnh hưởng đúng thread đó.
+
+Ngắt kết nối:
+- Client thoát đột ngột (rút mạng, đóng cửa sổ, Ctrl+C): server bắt `OSError` (gồm `ConnectionResetError`, `BrokenPipeError`, `TimeoutError`), xóa khỏi list online, hủy các file đang truyền dở, broadcast `USERS` mới.
+- Gửi vào một kết nối bị lỗi thì `Session.send` đóng luôn kết nối đó, tránh để stream bị lệch giữa chừng một gói.
+- Heartbeat: server gửi `PING` cho mọi client đã đăng nhập mỗi 15 giây, client tự trả `PONG`. Quá 30 giây không nhận được gì thì server coi như mất kết nối. Chưa đăng nhập thì chờ tối đa 120 giây.
+- Client cũng có timeout 45 giây: không thấy `PING` của server thì báo mất kết nối, bấm Enter để thoát.
+- Client bắt `Ctrl+C` hoặc EOF, gửi `BYE` rồi thoát gọn. Server tắt bằng Ctrl+C thì in `Server đã dừng`.
+- Mở client khi chưa chạy server thì báo `Không kết nối được`, không in traceback.
+
+Gói sai:
+- JSON hỏng, không phải object, thiếu `type`, sai kiểu dữ liệu, loại gói lạ: server trả `ERROR` mã `BAD_PACKET` và giữ kết nối. Quá 5 gói lỗi thì ngắt.
+- Gói lớn hơn 1 MB: trả `PACKET_TOO_LARGE` rồi ngắt luôn, vì không đọc hết phần thân nên không đồng bộ lại stream được.
+- `FILE_START` có `size` âm, sai kiểu, hoặc vượt 100 MB thì bị từ chối bằng `FILE_ERROR`. Bên nhận hủy file nếu nhận nhiều hơn `size` đã khai báo, hoặc không ghi được xuống đĩa.
+
+Một số thay đổi khác:
+- Client có `send_lock` riêng, vì thread nghe tự trả `PONG` xen giữa các mảnh file do luồng chính đang gửi.
+- `username` lưu trong `Session`, nên đăng nhập dở giữa chừng không còn để lại "ma" trong list online.
+- `common/protocol.py` có thêm `PacketTooLarge` để server phân biệt gói quá lớn với gói hỏng thông thường.
+
+Cách test:
+- Chạy server, mở 2 client rồi để yên hơn 1 phút. Cả hai vẫn online vì tự trả `PONG`.
+- Đóng đột ngột cửa sổ một client: client kia nhận list mới, server không báo lỗi.
+- Bấm Ctrl+C ở client: client in `Đã thoát`, client kia nhận list mới.
+- Tắt server bằng Ctrl+C: in `Server đã dừng`. Client đang mở sẽ báo mất kết nối.
+- Chạy client khi chưa bật server: nhận thông báo `Không kết nối được`.
 
 ## Cấu trúc thư mục
 
