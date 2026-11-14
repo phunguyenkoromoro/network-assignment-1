@@ -12,7 +12,7 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 6: gửi file
 - [x] Bước 7: xử lý lỗi và ngắt kết nối
 - [x] Bước 8: mã hóa
-- [ ] Bước 9: giao diện CLI
+- [x] Bước 9: giao diện CLI
 - [ ] Bước 10: test và dọn code
 
 ## Yêu cầu
@@ -188,6 +188,38 @@ Cách test:
 - Xóa `secret.key` ở thư mục của một client (máy khác) rồi chạy lại: khóa mới sinh ra khác server, client báo không giải mã được.
 - Muốn thấy dữ liệu bị mã hóa thì bắt gói trên loopback bằng Wireshark, nội dung chỉ là byte ngẫu nhiên, không đọc được chữ nào.
 
+## Bước 9: giao diện CLI
+
+Giao diện chạy trong terminal, dùng thư viện `prompt_toolkit` (cài bằng `pip install -r requirements.txt`). Chạy trong PowerShell, CMD hoặc terminal của VS Code, không chạy được trong Git Bash (mintty).
+
+Code giao diện tách riêng ở `client/ui.py` (class `ChatUI`), còn `client/client.py` chỉ lo phần mạng rồi gọi `ui` để hiển thị.
+
+Giao diện gồm:
+- Dòng nhập `phu> ` ở dưới cùng. Tin nhắn mới tới được in phía trên dòng này, không làm hỏng chữ đang gõ dở (nhờ `patch_stdout`).
+- Thanh trạng thái (bottom toolbar) luôn hiện danh sách người online và progress bar của file đang gửi (↑) hoặc đang nhận (↓), cập nhật mỗi 0.3 giây.
+- Mỗi dòng có giờ `[HH:MM]`. Tin chung hiện `tên: nội dung` (mỗi người một màu), tin riêng hiện `A → bạn (riêng)`, tin của chính mình hiện `bạn: ...`, thông báo hệ thống bắt đầu bằng `***`, lỗi màu đỏ.
+- Thông báo `*** nam đã vào` hoặc `*** nam đã thoát` tạo ra bằng cách so danh sách `USERS` mới với danh sách cũ.
+- Bấm Tab để gợi ý lệnh (`/msg`, `/send`...) và tên người dùng đang online.
+
+Lệnh:
+- Gõ chữ bình thường: chat chung.
+- `/msg <tên> <nội dung>`: nhắn riêng.
+- `/send <tên> <đường dẫn>`: gửi file.
+- `/users`, `/help`, `/clear`, `/quit` (hoặc Ctrl+C, Ctrl+D).
+
+Thay đổi so với các bước trước:
+- Gửi file chạy trong thread riêng, nên vừa gửi vừa gõ lệnh hoặc chat bình thường được.
+- `/users` đọc danh sách có sẵn ở client (server tự broadcast mỗi khi có người vào hoặc ra), không cần hỏi lại server.
+- `/msg` và `/send` cho người không online thì chặn ngay ở client.
+- Mất kết nối tới server thì client tự thoát khỏi dòng nhập, không cần bấm Enter.
+
+Cách test:
+- Cài thư viện, chạy server và 2 client (`phu`, `nam`) trong 2 terminal.
+- `nam` vào thì `phu` thấy `*** nam đã vào`, thanh trạng thái hiện `Online (2): nam, phu`.
+- Gõ chữ thường, `/msg nam ...`, `/users`, `/help`, thử Tab sau khi gõ `/ms` hoặc `/msg na`.
+- `phu` gửi một file vài chục MB cho `nam`: cả hai thấy progress bar chạy ở thanh dưới cùng, trong lúc đó `phu` vẫn chat được.
+- Đóng client `nam` thì `phu` thấy `*** nam đã thoát`.
+
 ## Cấu trúc thư mục
 
 ```
@@ -195,10 +227,13 @@ network-assignment-1/
 ├── server/
 │   └── server.py
 ├── client/
-│   └── client.py
+│   ├── client.py        # logic mạng của client
+│   └── ui.py            # giao diện CLI
 ├── common/
-│   └── protocol.py      # hàm đóng gói và đọc gói dùng chung
+│   └── protocol.py      # đóng gói, mã hóa AES-GCM và đọc gói dùng chung
 ├── docs/
 │   └── protocol.md      # đặc tả giao thức
+├── requirements.txt     # cryptography, prompt_toolkit
+├── .gitignore
 └── README.md
 ```
