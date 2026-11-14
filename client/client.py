@@ -6,6 +6,10 @@ import socket
 import threading
 import uuid
 
+try:
+    from client.UI import ChatUI, format_size
+except ImportError:
+    raise SystemExit("Thiếu thư viện prompt_toolkit, chạy: pip install -r requirements.txt")
 from common.protocol import DecryptError, recv_packet, send_packet
 
 HOST = "127.0.0.1"
@@ -14,7 +18,7 @@ CHUNK_SIZE = 4096
 DOWNLOAD_DIR = "downloads"
 HEARTBEAT_TIMEOUT = 45
 
-online = set()
+ui = None
 incoming = {}
 aborted = set()
 send_lock = threading.Lock()
@@ -39,29 +43,36 @@ def login(sock):
 
 def send_file(sock, username, to, path):
     if not os.path.isfile(path):
-        print("Không tìm thấy file:", path)
+        ui.error(f"Không tìm thấy file: {path}")
         return
     file_id = uuid.uuid4().hex[:8]
     name = os.path.basename(path)
     size = os.path.getsize(path)
-    send(sock, {"type": "FILE_START", "from": username, "to": to, "file_id": file_id,
-                "filename": name, "size": size, "chunk_size": CHUNK_SIZE})
-    digest = hashlib.sha256()
-    sent = 0
-    seq = 0
-    with open(path, "rb") as f:
-        while chunk := f.read(CHUNK_SIZE):
-            if file_id in aborted:
-                print("\nGửi file bị hủy")
-                return
-            digest.update(chunk)
-            data = base64.b64encode(chunk).decode("ascii")
-            send(sock, {"type": "FILE_CHUNK", "file_id": file_id, "seq": seq, "data": data})
-            seq += 1
-            sent += len(chunk)
-            print(f"\rĐang gửi {name}: {sent * 100 // size}%", end="", flush=True)
-    send(sock, {"type": "FILE_END", "file_id": file_id, "sha256": digest.hexdigest()})
-    print(f"\nĐã gửi xong {name}")
+    ui.progress[file_id] = {"name": name, "dir": "send", "done": 0, "total": size}
+    try:
+        send(sock, {"type": "FILE_START", "from": username, "to": to, "file_id": file_id,
+                    "filename": name, "size": size, "chunk_size": CHUNK_SIZE})
+        ui.notice(f"Bắt đầu gửi {name} ({format_size(size)}) cho {to}")
+        digest = hashlib.sha256()
+        sent = 0
+        seq = 0
+        with open(path, "rb") as f:
+            while chunk := f.read(CHUNK_SIZE):
+                if file_id in aborted:
+                    ui.notice(f"Đã hủy gửi {name}")
+                    return
+                digest.update(chunk)
+                data = base64.b64encode(chunk).decode("ascii")
+                send(sock, {"type": "FILE_CHUNK", "file_id": file_id, "seq": seq, "data": data})
+                seq += 1
+                sent += len(chunk)
+                ui.progress[file_id]["done"] = sent
+        send(sock, {"type": "FILE_END", "file_id": file_id, "sha256": digest.hexdigest()})
+        ui.notice(f"Đã gửi xong {name}")
+    except OSError:
+        ui.error(f"Gửi {name} thất bại, mất kết nối tới server")
+    finally:
+        ui.progress.pop(file_id, None)
 
 
 def unique_path(name):
@@ -78,18 +89,21 @@ def on_file_start(packet):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     name = packet["filename"].replace("\\", "/").split("/")[-1] or "file"
     part = os.path.join(DOWNLOAD_DIR, uuid.uuid4().hex + ".part")
-    incoming[packet["file_id"]] = {"name": name, "size": packet["size"], "part": part,
-                                   "file": open(part, "wb"), "digest": hashlib.sha256(),
-                                   "seq": 0, "received": 0}
-    print(f"\n{packet['from']} đang gửi file {name} ({packet['size']} byte)")
+    file_id = packet["file_id"]
+    incoming[file_id] = {"name": name, "size": packet["size"], "part": part,
+                         "file": open(part, "wb"), "digest": hashlib.sha256(),
+                         "seq": 0, "received": 0}
+    ui.progress[file_id] = {"name": name, "dir": "recv", "done": 0, "total": packet["size"]}
+    ui.notice(f"{packet['from']} đang gửi file {name} ({format_size(packet['size'])})")
 
 
 def cancel_incoming(file_id, reason):
     transfer = incoming.pop(file_id, None)
+    ui.progress.pop(file_id, None)
     if transfer:
         transfer["file"].close()
         os.remove(transfer["part"])
-        print(f"Đã hủy nhận {transfer['name']}: {reason}")
+        ui.error(f"Đã hủy nhận {transfer['name']}: {reason}")
 
 
 def on_file_chunk(packet):
@@ -112,10 +126,13 @@ def on_file_chunk(packet):
     transfer["digest"].update(data)
     transfer["seq"] += 1
     transfer["received"] += len(data)
+    ui.progress[file_id]["done"] = transfer["received"]
 
 
 def on_file_end(packet):
-    transfer = incoming.pop(packet["file_id"], None)
+    file_id = packet["file_id"]
+    transfer = incoming.pop(file_id, None)
+    ui.progress.pop(file_id, None)
     if transfer is None:
         return
     transfer["file"].close()
@@ -123,21 +140,33 @@ def on_file_end(packet):
     if transfer["received"] == transfer["size"] and transfer["digest"].hexdigest() == packet["sha256"]:
         path = unique_path(name)
         os.replace(transfer["part"], path)
-        print(f"\nĐã nhận xong {name}, SHA-256 khớp, lưu tại {path}")
+        ui.notice(f"Đã nhận xong {name}, SHA-256 khớp, lưu tại {path}")
     else:
         os.remove(transfer["part"])
-        print(f"\nFile {name} bị hỏng (sai kích thước hoặc SHA-256), đã xóa")
+        ui.error(f"File {name} bị hỏng (sai kích thước hoặc SHA-256), đã xóa")
+
+
+def update_online(users):
+    new = frozenset(users)
+    if ui.online:
+        for name in sorted(new - ui.online):
+            ui.notice(f"{name} đã vào")
+        for name in sorted(ui.online - new):
+            ui.notice(f"{name} đã thoát")
+    else:
+        ui.notice("Đang online: " + ", ".join(sorted(new)))
+    ui.online = new
 
 
 def handle_packet(sock, packet):
     kind = packet["type"]
     if kind == "USERS":
-        online.clear()
-        online.update(packet["users"])
-        print("\nNgười đang online: " + ", ".join(packet["users"]))
+        update_online(packet["users"])
     elif kind == "MSG":
-        tag = "Chung" if packet["to"] == "ALL" else "Riêng"
-        print(f"\n[{tag}] {packet['from']}: {packet['text']}")
+        if packet["to"] == "ALL":
+            ui.chat(packet["from"], packet["text"])
+        else:
+            ui.private_in(packet["from"], packet["text"])
     elif kind == "FILE_START":
         on_file_start(packet)
     elif kind == "FILE_CHUNK":
@@ -147,12 +176,10 @@ def handle_packet(sock, packet):
     elif kind == "PING":
         send(sock, {"type": "PONG"})
     elif kind == "ERROR":
-        print("\nLỗi:", packet["message"])
+        ui.error(packet["message"])
         if "file_id" in packet:
             aborted.add(packet["file_id"])
             cancel_incoming(packet["file_id"], packet["message"])
-    else:
-        print("\n", packet)
 
 
 def listen(sock, done, lost):
@@ -162,14 +189,47 @@ def listen(sock, done, lost):
             try:
                 handle_packet(sock, packet)
             except (KeyError, TypeError, ValueError, OSError) as e:
-                print(f"\nKhông xử lý được gói từ server: {e!r}")
+                ui.error(f"Không xử lý được gói từ server: {e!r}")
     except (OSError, ValueError):
         if not done.is_set():
             lost.set()
-            print("\nMất kết nối tới server, nhấn Enter để thoát")
+            ui.error("Mất kết nối tới server")
+            ui.interrupt()
+
+
+def handle_command(sock, username, line):
+    command, _, rest = line.partition(" ")
+    if command == "/users":
+        ui.users()
+    elif command == "/help":
+        ui.help()
+    elif command == "/clear":
+        ui.clear()
+    elif command == "/msg":
+        target, _, text = rest.partition(" ")
+        text = text.strip()
+        if not target or not text:
+            ui.error("Cú pháp: /msg <tên> <nội dung>")
+        elif target not in ui.online:
+            ui.error("Người nhận không online")
+        else:
+            send(sock, {"type": "MSG", "from": username, "to": target, "text": text})
+            ui.private_out(target, text)
+    elif command == "/send":
+        target, _, path = rest.partition(" ")
+        path = path.strip().strip('"')
+        if not target or not path:
+            ui.error("Cú pháp: /send <tên> <đường dẫn file>")
+        elif target not in ui.online:
+            ui.error("Người nhận không online")
+        else:
+            threading.Thread(target=send_file, args=(sock, username, target, path), daemon=True).start()
+    else:
+        ui.error("Lệnh không hợp lệ, gõ /help để xem danh sách lệnh")
 
 
 def main():
+    global ui
     try:
         sock = socket.create_connection((HOST, PORT), timeout=5)
     except OSError:
@@ -182,45 +242,34 @@ def main():
         lost = threading.Event()
         try:
             username = login(sock)
+            try:
+                ui = ChatUI(username)
+            except Exception as e:
+                print(f"Terminal không hỗ trợ giao diện này ({e}). Hãy chạy trong PowerShell, CMD hoặc terminal của VS Code.")
+                return
             sock.settimeout(HEARTBEAT_TIMEOUT)
-            threading.Thread(target=listen, args=(sock, done, lost), daemon=True).start()
-            print("Gõ chữ bình thường để chat chung")
-            print("Lệnh: /msg <tên> <nội dung>, /send <tên> <đường dẫn file>, /users, /quit")
-            while True:
-                line = input().strip()
-                if lost.is_set():
-                    break
-                if not line:
-                    continue
-                if line == "/users":
-                    send(sock, {"type": "GET_USERS"})
-                elif line == "/quit":
-                    break
-                elif line.startswith("/msg "):
-                    parts = line.split(" ", 2)
-                    if len(parts) < 3:
-                        print("Cú pháp: /msg <tên> <nội dung>")
+            with ui.context():
+                threading.Thread(target=listen, args=(sock, done, lost), daemon=True).start()
+                ui.notice("Gõ /help để xem lệnh, gõ chữ bình thường để chat chung")
+                while True:
+                    line = ui.read().strip()
+                    if lost.is_set() or line == "/quit":
+                        break
+                    if not line:
                         continue
-                    send(sock, {"type": "MSG", "from": username, "to": parts[1], "text": parts[2]})
-                elif line.startswith("/send "):
-                    parts = line.split(" ", 2)
-                    if len(parts) < 3:
-                        print("Cú pháp: /send <tên> <đường dẫn file>")
-                    elif parts[1] not in online:
-                        print("Người nhận không online")
+                    if line.startswith("/"):
+                        handle_command(sock, username, line)
                     else:
-                        send_file(sock, username, parts[1], parts[2].strip().strip('"'))
-                elif line.startswith("/"):
-                    print("Lệnh không hợp lệ")
-                else:
-                    send(sock, {"type": "MSG", "from": username, "to": "ALL", "text": line})
+                        send(sock, {"type": "MSG", "from": username, "to": "ALL", "text": line})
+                        ui.own_chat(line)
         except DecryptError:
             print("\nKhông giải mã được dữ liệu từ server, kiểm tra file secret.key giống nhau ở server và client")
         except (OSError, ValueError):
             if not lost.is_set():
                 print("\nMất kết nối tới server")
         except (KeyboardInterrupt, EOFError):
-            print("\nĐã thoát")
+            if not lost.is_set():
+                print("\nĐã thoát")
         finally:
             done.set()
             try:
