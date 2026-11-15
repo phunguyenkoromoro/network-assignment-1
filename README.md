@@ -13,32 +13,43 @@ Bài tập lớn môn Mạng Máy tính: chat và gửi file giữa nhiều clie
 - [x] Bước 7: xử lý lỗi và ngắt kết nối
 - [x] Bước 8: mã hóa
 - [x] Bước 9: giao diện CLI
-- [ ] Bước 10: test và dọn code
+- [x] Bước 10: test và dọn code
 
 ## Yêu cầu
 
-- Python 3.8 trở lên
-- Chưa cần cài thư viện nào. Từ bước 8 sẽ cần `cryptography`.
+- Python 3.8 trở lên.
+- Thư viện: `cryptography` (mã hóa AES-GCM) và `prompt_toolkit` (giao diện CLI), có trong `requirements.txt`.
+- Chạy được trên Windows, macOS, Linux. Client nên chạy trong PowerShell, CMD, Windows Terminal hoặc terminal của VS Code, không dùng Git Bash (mintty).
 
 ## Cách chạy
 
-Chạy từ thư mục gốc của repo, mở 2 terminal.
+Chạy mọi lệnh từ thư mục gốc của repo (thư mục chứa `server/`, `client/`, `common/`).
 
-Terminal 1, chạy server:
+1. Cài thư viện:
+```
+pip install -r requirements.txt
+```
+
+2. Chạy server (terminal 1). Mặc định cổng 5000, muốn đổi thì thêm số cổng:
 ```
 python -m server.server
+python -m server.server 6000
 ```
 
-Terminal 2, chạy client:
+3. Chạy client (mỗi client một terminal riêng):
 ```
 python -m client.client
 ```
+Nhập tên đăng nhập và mật khẩu. Tên chưa có thì tự đăng ký. Mở 2-3 terminal với các tên khác nhau để thử.
 
-Kết quả mong đợi:
-- Server in ra `[+] ... đã kết nối` rồi `[-] ... đã ngắt kết nối`.
-- Client in ra `Server trả lời: {'type': 'PONG'}`.
+4. Dùng các lệnh `/msg`, `/send`, `/users`, `/help`, `/quit` (xem mục Bước 9). Gõ chữ bình thường để chat chung.
 
-Nếu gõ `python` không chạy được trên Windows thì thử `py`.
+Chạy trên nhiều máy trong cùng mạng LAN:
+- Máy server: chạy `python -m server.server`, xem địa chỉ IP bằng `ipconfig` (Windows) hoặc `ifconfig` / `ip a` (macOS, Linux). Cho phép cổng 5000 qua firewall.
+- Copy file `secret.key` từ máy server sang thư mục gốc repo trên mỗi máy client. Khác khóa thì client báo không giải mã được.
+- Máy client: `python -m client.client <IP-server>`, có thể thêm cổng: `python -m client.client 192.168.1.10 6000`.
+
+Nếu gõ `python` không chạy được thì thử `py`.
 
 ## Bước 4: đăng nhập và quản lý người dùng
 
@@ -51,6 +62,7 @@ Luật đăng nhập:
 - Tên không hợp lệ khi không phải chữ/số, dài hơn 20 ký tự, hoặc trùng `ALL` (vì `ALL` là đích của chat chung).
 - Chưa đăng nhập mà gửi gói khác `AUTH` thì nhận `ERROR` với mã `NOT_AUTHENTICATED`.
 - Mỗi lần có người vào hoặc ra, server broadcast `USERS` cho tất cả client đang online.
+- Server lưu IP và cổng của từng kết nối (`Session.addr`) và in ra console mỗi lần có người vào hoặc ra, ví dụ `[i] Đang online: phu (127.0.0.1:50123)`.
 
 Client sau khi đăng nhập có thêm một thread riêng để nghe gói từ server, nên danh sách online tự cập nhật mà không cần gõ lệnh. Lệnh hiện có:
 - `/users`: xin danh sách người online
@@ -66,7 +78,7 @@ Cách test:
 
 Lưu ý:
 - `server/users.json` chứa hash mật khẩu nên không commit, đã thêm vào `.gitignore`.
-- Mật khẩu hiện gửi plaintext trên đường truyền, bước 8 (mã hóa) sẽ xử lý.
+- Mật khẩu được mã hóa trên đường truyền từ bước 8. Hash trong `users.json` vẫn chưa salt.
 
 ## Bước 5: nhắn tin chung và riêng
 
@@ -192,7 +204,7 @@ Cách test:
 
 Giao diện chạy trong terminal, dùng thư viện `prompt_toolkit` (cài bằng `pip install -r requirements.txt`). Chạy trong PowerShell, CMD hoặc terminal của VS Code, không chạy được trong Git Bash (mintty).
 
-Code giao diện tách riêng ở `client/ui.py` (class `ChatUI`), còn `client/client.py` chỉ lo phần mạng rồi gọi `ui` để hiển thị.
+Code giao diện tách riêng ở `client/UI.py` (class `ChatUI`), còn `client/client.py` chỉ lo phần mạng rồi gọi `UI` để hiển thị.
 
 Giao diện gồm:
 - Dòng nhập `phu> ` ở dưới cùng. Tin nhắn mới tới được in phía trên dòng này, không làm hỏng chữ đang gõ dở (nhờ `patch_stdout`).
@@ -220,6 +232,41 @@ Cách test:
 - `phu` gửi một file vài chục MB cho `nam`: cả hai thấy progress bar chạy ở thanh dưới cùng, trong lúc đó `phu` vẫn chat được.
 - Đóng client `nam` thì `phu` thấy `*** nam đã thoát`.
 
+## Bước 10: test và chất lượng code
+
+Chạy toàn bộ test tự động (khoảng 10 giây):
+```
+python -m unittest discover -s tests -v
+```
+
+Các file test trong `tests/`:
+- `test_protocol.py`: đóng gói, mã hóa AES-GCM (không lộ chữ trên đường truyền, sửa 1 bit hoặc sai khóa thì bị từ chối, gói quá ngắn hoặc quá lớn).
+- `test_server.py`: chạy server thật trên cổng ngẫu nhiên với file tài khoản tạm, rồi kết nối bằng socket. Gồm đăng nhập, chat chung và riêng, gửi file, gói sai định dạng, client rớt đột ngột, heartbeat, và 20 client chat cùng lúc.
+- `test_client.py`: nhận file (SHA-256, thứ tự mảnh, chống path traversal, trùng tên), cập nhật danh sách online, hàm hỗ trợ giao diện.
+
+Test thủ công nhiều terminal (mô phỏng mạng cục bộ):
+- Mở 1 terminal chạy server, 3 terminal chạy client với 3 tên khác nhau.
+- Chat chung, chat riêng, gửi file vài chục MB, quan sát progress bar và danh sách online.
+- Đóng đột ngột một client (đóng cửa sổ terminal): server không crash, các client còn lại thấy `*** ... đã thoát`.
+- Tắt server bằng Ctrl+C: các client tự báo mất kết nối.
+
+Chất lượng code:
+- Code tách 3 phần: mạng (`common/protocol.py`, `server/server.py`, phần xử lý gói trong `client/client.py`), xử lý dữ liệu (đăng nhập, định tuyến, ghép file) và giao diện (`client/UI.py`).
+- Các hàm và những chỗ khó (`Lock`, `send_lock`, base64, nonce của AES-GCM...) đều có comment giải thích bằng tiếng Việt. Code được format bằng `black` (độ dài dòng 100) và kiểm tra bằng `ruff`.
+
+## Kiến trúc tổng quan
+
+```mermaid
+flowchart LR
+    subgraph Client
+        UI["client/UI.py<br>giao diện CLI"] --> NET["client/client.py<br>logic mạng"]
+    end
+    NET -- "TCP, gói tin mã hóa AES-GCM" --> SRV["server/server.py<br>đăng nhập, định tuyến, chuyển tiếp file"]
+    PROTO["common/protocol.py<br>đóng gói và mã hóa"] -.-> NET
+    PROTO -.-> SRV
+    SRV --> DB[("server/users.json")]
+```
+
 ## Cấu trúc thư mục
 
 ```
@@ -228,12 +275,22 @@ network-assignment-1/
 │   └── server.py
 ├── client/
 │   ├── client.py        # logic mạng của client
-│   └── ui.py            # giao diện CLI
+│   └── UI.py            # giao diện CLI
 ├── common/
 │   └── protocol.py      # đóng gói, mã hóa AES-GCM và đọc gói dùng chung
+├── tests/
+│   ├── test_protocol.py
+│   ├── test_server.py
+│   └── test_client.py
 ├── docs/
 │   └── protocol.md      # đặc tả giao thức
 ├── requirements.txt     # cryptography, prompt_toolkit
 ├── .gitignore
 └── README.md
 ```
+
+File tự sinh khi chạy, đã có trong `.gitignore` nên không commit:
+- `secret.key` (thư mục gốc): khóa AES dùng chung giữa server và client.
+- `server/users.json`: tài khoản đã đăng ký, mật khẩu lưu dạng hash.
+- `downloads/` (thư mục chạy client): file nhận được.
+- `__pycache__/`: cache của Python.
